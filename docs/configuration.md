@@ -847,6 +847,15 @@ Optionally specify the headers that will be sent with the request. Example:
         User-Agent: Custom User Agent
 ```
 
+###### `feed-title-key`
+An alternate title for entries in the feed. Useful when using an aggregated feed. By default the shown title for a feed entry is the `title` property (if set) or the title of the feed. Possible values are:
+
+* `source` - Uses the title from the `<source>` tag of an entry
+* `link` - Uses the host part of the entry URL, e.g. `news.google.com` from `https://news.google.com/rss/articles`
+* `author` - Uses the author's name or, if not set, email
+
+In all cases, if the desired value is empty then it falls back to the default title.
+
 ### Videos
 Display a list of the latest videos from specific YouTube channels.
 

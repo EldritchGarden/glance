@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	"github.com/mmcdole/gofeed/atom"
 	gofeedext "github.com/mmcdole/gofeed/extensions"
+	"github.com/mmcdole/gofeed/rss"
 )
 
 var (
@@ -137,9 +139,87 @@ type rssFeedRequest struct {
 	ItemLinkPrefix  string            `yaml:"item-link-prefix"`
 	Headers         map[string]string `yaml:"headers"`
 	IsDetailed      bool              `yaml:"-"`
+	TitleKey        string            `yaml:"feed-title-key"`
 }
 
 type rssFeedItemList []rssFeedItem
+
+// Custom translators to preserve source tag that is not included in the default gofeed.Item
+type rssTranslator struct {
+	defaultTranslator *gofeed.DefaultRSSTranslator
+}
+
+func newRssTranslator() *rssTranslator {
+	t := &rssTranslator{}
+	t.defaultTranslator = &gofeed.DefaultRSSTranslator{}
+	return t
+}
+
+func (ct *rssTranslator) Translate(feed interface{}) (*gofeed.Feed, error) {
+	rss, found := feed.(*rss.Feed)
+	if !found {
+		return nil, fmt.Errorf("Feed did not match expected type of *rss.Feed")
+	}
+
+	f, err := ct.defaultTranslator.Translate(rss)
+	if err != nil {
+		return nil, err
+	}
+
+	// keep source info
+	for i := range f.Items {
+		if f.Items[i].Custom == nil {
+			f.Items[i].Custom = make(map[string]string)
+		}
+
+		if rss.Items[i].Source != nil && rss.Items[i].Source.Title != "" {
+			f.Items[i].Custom["source_title"] = rss.Items[i].Source.Title
+		}
+		if rss.Items[i].Source != nil && rss.Items[i].Source.URL != "" {
+			f.Items[i].Custom["source_url"] = rss.Items[i].Source.URL
+		}
+	}
+
+	return f, nil
+}
+
+type atomTranslator struct {
+	defaultTranslator *gofeed.DefaultAtomTranslator
+}
+
+func newAtomTranslator() *atomTranslator {
+	t := &atomTranslator{}
+	t.defaultTranslator = &gofeed.DefaultAtomTranslator{}
+	return t
+}
+
+func (ct *atomTranslator) Translate(feed interface{}) (*gofeed.Feed, error) {
+	atom, found := feed.(*atom.Feed)
+	if !found {
+		return nil, fmt.Errorf("Feed did not match expected type of *atom.Feed")
+	}
+
+	f, err := ct.defaultTranslator.Translate(atom)
+	if err != nil {
+		return nil, err
+	}
+
+	// keep source info
+	for i := range f.Items {
+		if f.Items[i].Custom == nil {
+			f.Items[i].Custom = make(map[string]string)
+		}
+
+		if atom.Entries[i].Source != nil && atom.Entries[i].Source.Title != "" {
+			f.Items[i].Custom["source_title"] = atom.Entries[i].Source.Title
+		}
+		if atom.Entries[i].Source != nil && atom.Entries[i].Source.ID != "" {
+			f.Items[i].Custom["source_url"] = atom.Entries[i].Source.ID
+		}
+	}
+
+	return f, nil
+}
 
 func (f rssFeedItemList) sortByNewest() rssFeedItemList {
 	sort.Slice(f, func(i, j int) bool {
@@ -232,6 +312,11 @@ func (widget *rssWidget) fetchItemsFromFeedTask(request rssFeedRequest) ([]rssFe
 		return nil, err
 	}
 
+	if request.TitleKey == "source" {
+		feedParser.RSSTranslator = newRssTranslator()
+		feedParser.AtomTranslator = newAtomTranslator()
+	}
+
 	feed, err := feedParser.ParseString(string(body))
 	if err != nil {
 		return nil, err
@@ -303,9 +388,32 @@ func (widget *rssWidget) fetchItemsFromFeedTask(request rssFeedRequest) ([]rssFe
 			}
 		}
 
-		if request.Title != "" {
+		// this is best effort, so if it fails we fall through to request or feed title
+		if request.TitleKey != "" {
+			switch request.TitleKey {
+			case "source":
+				if sourceTitle, ok := item.Custom["source_title"]; ok {
+					rssItem.ChannelName = sourceTitle
+				} else if sourceURL, ok := item.Custom["source_url"]; ok {
+					rssItem.ChannelName = sourceURL
+				}
+			case "link":
+				parsedUrl, err := url.Parse(item.Link)
+				if err == nil {
+					rssItem.ChannelName = parsedUrl.Host
+				}
+			case "author":
+				if item.Author != nil && item.Author.Name != "" {
+					rssItem.ChannelName = item.Author.Name
+				} else if item.Author != nil && item.Author.Email != "" {
+					rssItem.ChannelName = item.Author.Email
+				}
+			}
+		}
+
+		if request.Title != "" && rssItem.ChannelName == "" {
 			rssItem.ChannelName = request.Title
-		} else {
+		} else if rssItem.ChannelName == "" {
 			rssItem.ChannelName = feed.Title
 		}
 
