@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -139,7 +140,7 @@ type rssFeedRequest struct {
 	ItemLinkPrefix  string            `yaml:"item-link-prefix"`
 	Headers         map[string]string `yaml:"headers"`
 	IsDetailed      bool              `yaml:"-"`
-	TitleKey        string            `yaml:"feed-title-key"`
+	TitleKey        []string          `yaml:"feed-title-key"`
 }
 
 type rssFeedItemList []rssFeedItem
@@ -312,7 +313,7 @@ func (widget *rssWidget) fetchItemsFromFeedTask(request rssFeedRequest) ([]rssFe
 		return nil, err
 	}
 
-	if request.TitleKey == "source" {
+	if slices.Contains(request.TitleKey, "source") {
 		feedParser.RSSTranslator = newRssTranslator()
 		feedParser.AtomTranslator = newAtomTranslator()
 	}
@@ -389,8 +390,8 @@ func (widget *rssWidget) fetchItemsFromFeedTask(request rssFeedRequest) ([]rssFe
 		}
 
 		// this is best effort, so if it fails we fall through to request or feed title
-		if request.TitleKey != "" {
-			switch request.TitleKey {
+		for _, key := range request.TitleKey {
+			switch key {
 			case "source":
 				if sourceTitle, ok := item.Custom["source_title"]; ok {
 					rssItem.ChannelName = sourceTitle
@@ -398,16 +399,33 @@ func (widget *rssWidget) fetchItemsFromFeedTask(request rssFeedRequest) ([]rssFe
 					rssItem.ChannelName = sourceURL
 				}
 			case "link":
-				parsedUrl, err := url.Parse(item.Link)
-				if err == nil {
+				if parsedUrl, err := url.Parse(item.Link); err == nil {
 					rssItem.ChannelName = parsedUrl.Host
 				}
-			case "author":
+			case "author-name":
 				if item.Author != nil && item.Author.Name != "" {
 					rssItem.ChannelName = item.Author.Name
-				} else if item.Author != nil && item.Author.Email != "" {
+				}
+			case "author-email":
+				if item.Author != nil && item.Author.Email != "" {
 					rssItem.ChannelName = item.Author.Email
 				}
+			case "author-email-username":
+				if item.Author != nil && item.Author.Email != "" {
+					if at := strings.LastIndex(item.Author.Email, "@"); at != -1 {
+						rssItem.ChannelName = item.Author.Email[:at]
+					}
+				}
+			case "author-email-domain":
+				if item.Author != nil && item.Author.Email != "" {
+					if at := strings.LastIndex(item.Author.Email, "@"); at != -1 {
+						rssItem.ChannelName = item.Author.Email[at+1:]
+					}
+				}
+			}
+
+			if rssItem.ChannelName != "" {
+				break
 			}
 		}
 
