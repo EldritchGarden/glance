@@ -829,6 +829,7 @@ An array of RSS/atom feeds. The title can optionally be changed.
 | limit | integer | no | | |
 | item-link-prefix | string | no | | |
 | headers | key (string) & value (string) | no | | |
+| item-channel | sequence of mappings | no | | |
 
 ###### `limit`
 The maximum number of articles to show from that specific feed. Useful if you have a feed which posts a lot of articles frequently and you want to prevent it from excessively pushing down articles from other feeds.
