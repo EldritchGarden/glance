@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -132,95 +131,26 @@ type rssFeedItem struct {
 }
 
 type rssFeedRequest struct {
-	URL             string            `yaml:"url"`
-	Title           string            `yaml:"title"`
-	HideCategories  bool              `yaml:"hide-categories"`
-	HideDescription bool              `yaml:"hide-description"`
-	Limit           int               `yaml:"limit"`
-	ItemLinkPrefix  string            `yaml:"item-link-prefix"`
-	Headers         map[string]string `yaml:"headers"`
-	IsDetailed      bool              `yaml:"-"`
-	TitleKey        []string          `yaml:"feed-title-key"`
+	URL             string              `yaml:"url"`
+	Title           string              `yaml:"title"`
+	HideCategories  bool                `yaml:"hide-categories"`
+	HideDescription bool                `yaml:"hide-description"`
+	Limit           int                 `yaml:"limit"`
+	ItemLinkPrefix  string              `yaml:"item-link-prefix"`
+	Headers         map[string]string   `yaml:"headers"`
+	IsDetailed      bool                `yaml:"-"`
+	TitleKey        itemChannelPrefList `yaml:"item-channel"`
 }
+
+type itemChannelPref struct {
+	Key   string   `yaml:"key"`
+	Match string   `yaml:"match"`
+	Sub   []string `yaml:"sub"`
+}
+
+type itemChannelPrefList []itemChannelPref
 
 type rssFeedItemList []rssFeedItem
-
-// Custom translators to preserve source tag that is not included in the default gofeed.Item
-type rssTranslator struct {
-	defaultTranslator *gofeed.DefaultRSSTranslator
-}
-
-func newRssTranslator() *rssTranslator {
-	t := &rssTranslator{}
-	t.defaultTranslator = &gofeed.DefaultRSSTranslator{}
-	return t
-}
-
-func (ct *rssTranslator) Translate(feed interface{}) (*gofeed.Feed, error) {
-	rss, found := feed.(*rss.Feed)
-	if !found {
-		return nil, fmt.Errorf("Feed did not match expected type of *rss.Feed")
-	}
-
-	f, err := ct.defaultTranslator.Translate(rss)
-	if err != nil {
-		return nil, err
-	}
-
-	// keep source info
-	for i := range f.Items {
-		if f.Items[i].Custom == nil {
-			f.Items[i].Custom = make(map[string]string)
-		}
-
-		if rss.Items[i].Source != nil && rss.Items[i].Source.Title != "" {
-			f.Items[i].Custom["source_title"] = rss.Items[i].Source.Title
-		}
-		if rss.Items[i].Source != nil && rss.Items[i].Source.URL != "" {
-			f.Items[i].Custom["source_url"] = rss.Items[i].Source.URL
-		}
-	}
-
-	return f, nil
-}
-
-type atomTranslator struct {
-	defaultTranslator *gofeed.DefaultAtomTranslator
-}
-
-func newAtomTranslator() *atomTranslator {
-	t := &atomTranslator{}
-	t.defaultTranslator = &gofeed.DefaultAtomTranslator{}
-	return t
-}
-
-func (ct *atomTranslator) Translate(feed interface{}) (*gofeed.Feed, error) {
-	atom, found := feed.(*atom.Feed)
-	if !found {
-		return nil, fmt.Errorf("Feed did not match expected type of *atom.Feed")
-	}
-
-	f, err := ct.defaultTranslator.Translate(atom)
-	if err != nil {
-		return nil, err
-	}
-
-	// keep source info
-	for i := range f.Items {
-		if f.Items[i].Custom == nil {
-			f.Items[i].Custom = make(map[string]string)
-		}
-
-		if atom.Entries[i].Source != nil && atom.Entries[i].Source.Title != "" {
-			f.Items[i].Custom["source_title"] = atom.Entries[i].Source.Title
-		}
-		if atom.Entries[i].Source != nil && atom.Entries[i].Source.ID != "" {
-			f.Items[i].Custom["source_url"] = atom.Entries[i].Source.ID
-		}
-	}
-
-	return f, nil
-}
 
 func (f rssFeedItemList) sortByNewest() rssFeedItemList {
 	sort.Slice(f, func(i, j int) bool {
@@ -313,7 +243,7 @@ func (widget *rssWidget) fetchItemsFromFeedTask(request rssFeedRequest) ([]rssFe
 		return nil, err
 	}
 
-	if slices.Contains(request.TitleKey, "source") {
+	if request.TitleKey.contains("source") {
 		feedParser.RSSTranslator = newRssTranslator()
 		feedParser.AtomTranslator = newAtomTranslator()
 	}
@@ -389,43 +319,9 @@ func (widget *rssWidget) fetchItemsFromFeedTask(request rssFeedRequest) ([]rssFe
 			}
 		}
 
-		// this is best effort, so if it fails we fall through to request or feed title
-		for _, key := range request.TitleKey {
-			switch key {
-			case "source":
-				if sourceTitle, ok := item.Custom["source_title"]; ok {
-					rssItem.ChannelName = sourceTitle
-				} else if sourceURL, ok := item.Custom["source_url"]; ok {
-					rssItem.ChannelName = sourceURL
-				}
-			case "link":
-				if parsedUrl, err := url.Parse(item.Link); err == nil {
-					rssItem.ChannelName = parsedUrl.Host
-				}
-			case "author-name":
-				if item.Author != nil && item.Author.Name != "" {
-					rssItem.ChannelName = item.Author.Name
-				}
-			case "author-email":
-				if item.Author != nil && item.Author.Email != "" {
-					rssItem.ChannelName = item.Author.Email
-				}
-			case "author-email-username":
-				if item.Author != nil && item.Author.Email != "" {
-					if at := strings.LastIndex(item.Author.Email, "@"); at != -1 {
-						rssItem.ChannelName = item.Author.Email[:at]
-					}
-				}
-			case "author-email-domain":
-				if item.Author != nil && item.Author.Email != "" {
-					if at := strings.LastIndex(item.Author.Email, "@"); at != -1 {
-						rssItem.ChannelName = item.Author.Email[at+1:]
-					}
-				}
-			}
-
-			if rssItem.ChannelName != "" {
-				break
+		if request.TitleKey != nil {
+			if title := request.TitleKey.itemChannel(item); title != "" {
+				rssItem.ChannelName = title
 			}
 		}
 
@@ -467,6 +363,165 @@ func (widget *rssWidget) fetchItemsFromFeedTask(request rssFeedRequest) ([]rssFe
 	}
 
 	return items, nil
+}
+
+// Custom translators to preserve source tag that is not included in the default gofeed.Item
+type rssTranslator struct {
+	defaultTranslator *gofeed.DefaultRSSTranslator
+}
+
+func newRssTranslator() *rssTranslator {
+	t := &rssTranslator{}
+	t.defaultTranslator = &gofeed.DefaultRSSTranslator{}
+	return t
+}
+
+func (ct *rssTranslator) Translate(feed interface{}) (*gofeed.Feed, error) {
+	rss, found := feed.(*rss.Feed)
+	if !found {
+		return nil, fmt.Errorf("Feed did not match expected type of *rss.Feed")
+	}
+
+	f, err := ct.defaultTranslator.Translate(rss)
+	if err != nil {
+		return nil, err
+	}
+
+	// keep source info
+	for i := range f.Items {
+		if f.Items[i].Custom == nil {
+			f.Items[i].Custom = make(map[string]string)
+		}
+
+		if rss.Items[i].Source != nil && rss.Items[i].Source.Title != "" {
+			f.Items[i].Custom["source_title"] = rss.Items[i].Source.Title
+		}
+		if rss.Items[i].Source != nil && rss.Items[i].Source.URL != "" {
+			f.Items[i].Custom["source_url"] = rss.Items[i].Source.URL
+		}
+	}
+
+	return f, nil
+}
+
+type atomTranslator struct {
+	defaultTranslator *gofeed.DefaultAtomTranslator
+}
+
+func newAtomTranslator() *atomTranslator {
+	t := &atomTranslator{}
+	t.defaultTranslator = &gofeed.DefaultAtomTranslator{}
+	return t
+}
+
+func (ct *atomTranslator) Translate(feed interface{}) (*gofeed.Feed, error) {
+	atom, found := feed.(*atom.Feed)
+	if !found {
+		return nil, fmt.Errorf("Feed did not match expected type of *atom.Feed")
+	}
+
+	f, err := ct.defaultTranslator.Translate(atom)
+	if err != nil {
+		return nil, err
+	}
+
+	// keep source info
+	for i := range f.Items {
+		if f.Items[i].Custom == nil {
+			f.Items[i].Custom = make(map[string]string)
+		}
+
+		if atom.Entries[i].Source != nil && atom.Entries[i].Source.Title != "" {
+			f.Items[i].Custom["source_title"] = atom.Entries[i].Source.Title
+		}
+		if atom.Entries[i].Source != nil && atom.Entries[i].Source.ID != "" {
+			f.Items[i].Custom["source_url"] = atom.Entries[i].Source.ID
+		}
+	}
+
+	return f, nil
+}
+
+func (t itemChannelPrefList) contains(key string) bool {
+	for _, pref := range t {
+		if pref.Key == key {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (t itemChannelPrefList) itemChannel(item *gofeed.Item) string {
+	channelName := ""
+
+	for _, pref := range t {
+		switch pref.Key {
+		case "source":
+			if sourceTitle, ok := item.Custom["source_channelName"]; ok {
+				channelName = sourceTitle
+			} else if sourceURL, ok := item.Custom["source_url"]; ok {
+				channelName = sourceURL
+			}
+		case "link":
+			if parsedUrl, err := url.Parse(item.Link); err == nil {
+				channelName = parsedUrl.Host
+			}
+		case "author-name":
+			if item.Author != nil && item.Author.Name != "" {
+				channelName = item.Author.Name
+			}
+		case "author-email":
+			if item.Author != nil && item.Author.Email != "" {
+				channelName = item.Author.Email
+			}
+		case "author-email-username":
+			if item.Author != nil && item.Author.Email != "" {
+				if at := strings.LastIndex(item.Author.Email, "@"); at != -1 {
+					channelName = item.Author.Email[:at]
+				}
+			}
+		case "author-email-domain":
+			if item.Author != nil && item.Author.Email != "" {
+				if at := strings.LastIndex(item.Author.Email, "@"); at != -1 {
+					channelName = item.Author.Email[at+1:]
+				}
+			}
+		}
+
+		if channelName != "" {
+			if m, err := regexp.MatchString(pref.Match, channelName); !m || err != nil {
+				channelName = ""
+				continue
+			}
+
+			if len(pref.Sub) > 0 {
+				channelName = pref.subItemChannel(channelName)
+			}
+
+			break
+		}
+	}
+
+	return channelName
+}
+
+func (t itemChannelPref) subItemChannel(name string) string {
+	for _, s := range t.Sub {
+		sep := s[0]
+		elements := strings.Split(s, string(sep))
+
+		if len(elements) != 3 {
+			continue
+		}
+
+		if m, err := regexp.MatchString(elements[1], name); m && err == nil {
+			name = elements[2]
+			break
+		}
+	}
+
+	return strings.TrimSpace(name)
 }
 
 func findThumbnailInItemExtensions(item *gofeed.Item) string {

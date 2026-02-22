@@ -847,14 +847,56 @@ Optionally specify the headers that will be sent with the request. Example:
         User-Agent: Custom User Agent
 ```
 
-###### `feed-title-key`
-An alternate title for entries in the feed. Useful when using an aggregated feed. By default the shown title for a feed entry is the `title` property (if set) or the title of the feed. Possible values are:
+###### `item-channel`
+Configure dynamic channel names for feed entries. Useful when using an aggregated feed. By default the shown title for a feed entry is the `title` property (if set) or the title of the rss feed.
+
+```yaml
+- type: rss
+  feeds:
+    - url: https://domain.com/rss
+      item-channel:
+        - key: source
+          match: pattern
+          sub:
+            - /pattern/replacement
+```
+
+`key` is required. Valid values for `key` are:
 
 * `source` - Uses the title from the `<source>` tag of an entry
 * `link` - Uses the host part of the entry URL, e.g. `news.google.com` from `https://news.google.com/rss/articles`
-* `author` - Uses the author's name or, if not set, email
+* `author-name` - Uses the author's name
+* `author-email` - Uses the author's email address
+* `author-email-username` - Uses only the username portion of the author's email address
+* `author-email-domain` - Uses only the domain portion of the author's email address
 
-In all cases, if the desired value is empty then it falls back to the default title.
+In all cases, if the desired value is empty then it falls through to the next configured value or the defaults.
+
+`match` is optional and specifies a regex pattern which must match for `key` to be used as the channel name.
+
+`sub` is optional and defines a list of substitutions `/pattern/replacement` which will override the value for `key`. The `replacement` replaces the entire channel name, and does not support capture groups. Multiple substitutions can be defined and will be applied in order. The separator `/` can be any single UTF8 char that does not appear in pattern or replacement.
+
+It is possible to define multiple keys to use, which will be tried in order for each feed entry. If none of the configured keys have a value, then the channel name will default to the feed title.
+
+**Examples**
+- Use the author email only for entries which match `amazonses.com`. If the email matches `01009cb9a` then the channel name will be `DualShockers`, or if it matches `ff9a001` then `Auto Trader`. Otherwise the full email address is used.
+
+```yaml
+item-channel:
+  - key: author-email
+    match: amazonses\.com
+    sub:
+      - /01009cb9a/DualShockers
+      - /ff9a001/Auto Trader
+```
+
+- Use the entry source if available, otherwise use the URL domain.
+
+```yaml
+item-channel:
+  - key: source
+  - key: link
+```
 
 ### Videos
 Display a list of the latest videos from specific YouTube channels.
