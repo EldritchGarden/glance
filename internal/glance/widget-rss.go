@@ -145,6 +145,7 @@ type rssFeedRequest struct {
 type itemChannelPref struct {
 	Key   string   `yaml:"key"`
 	Match string   `yaml:"match"`
+	Field int      `yaml:"select"`
 	Sub   []string `yaml:"sub"`
 }
 
@@ -463,9 +464,12 @@ func (t itemChannelPrefList) itemChannel(item *gofeed.Item) string {
 			} else if sourceURL, ok := item.Custom["source_url"]; ok {
 				channelName = sourceURL
 			}
-		case "link":
+		case "host", "link":
 			if parsedUrl, err := url.Parse(item.Link); err == nil {
 				channelName = parsedUrl.Host
+				if pref.Key == "link" {
+					channelName += parsedUrl.Path
+				}
 			}
 		case "author-name":
 			if item.Author != nil && item.Author.Name != "" {
@@ -489,10 +493,15 @@ func (t itemChannelPrefList) itemChannel(item *gofeed.Item) string {
 			}
 		}
 
+		// post-processing
 		if channelName != "" {
 			if m, err := regexp.MatchString(pref.Match, channelName); !m || err != nil {
 				channelName = ""
 				continue
+			}
+
+			if fields := strings.Split(channelName, pref.Match); pref.Field > 0 && len(fields) >= pref.Field {
+				channelName = fields[pref.Field-1]
 			}
 
 			if len(pref.Sub) > 0 {
@@ -511,7 +520,7 @@ func (t itemChannelPref) subItemChannel(name string) string {
 		sep := s[0]
 		elements := strings.Split(s, string(sep))
 
-		if len(elements) != 3 {
+		if len(elements) < 3 {
 			continue
 		}
 

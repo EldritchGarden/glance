@@ -858,6 +858,7 @@ Configure dynamic channel names for feed entries. Useful when using an aggregate
       item-channel:
         - key: source
           match: pattern
+          select: integer
           sub:
             - /pattern/replacement
 ```
@@ -865,7 +866,8 @@ Configure dynamic channel names for feed entries. Useful when using an aggregate
 `key` is required. Valid values for `key` are:
 
 * `source` - Uses the title from the `<source>` tag of an entry
-* `link` - Uses the host part of the entry URL, e.g. `news.google.com` from `https://news.google.com/rss/articles`
+* `host` - Uses the host part of the entry URL, e.g. `news.google.com` from `https://news.google.com/rss/articles`
+* `link` - Uses the host + path of the entry URL, e.g. `news.google.com/rss/articles` from `https://news.google.com/rss/articles`
 * `author-name` - Uses the author's name
 * `author-email` - Uses the author's email address
 * `author-email-username` - Uses only the username portion of the author's email address
@@ -873,14 +875,16 @@ Configure dynamic channel names for feed entries. Useful when using an aggregate
 
 In all cases, if the desired value is empty then it falls through to the next configured value or the defaults.
 
-`match` is optional and specifies a regex pattern which must match for `key` to be used as the channel name.
+`match` is optional and specifies a regex pattern which must match for `key` to be used as the channel name. When `select` is specified, `match` is used as the field separator.
+
+`select` is optional and specifies a numbered field to extract from the `key`, similar to awk. When `select` is used, `match` is required and used as the field separator.
 
 `sub` is optional and defines a list of substitutions `/pattern/replacement` which will override the value for `key`. The `replacement` replaces the entire channel name, and does not support capture groups. Multiple substitutions can be defined and will be applied in order. The separator `/` can be any single UTF8 char that does not appear in pattern or replacement.
 
 It is possible to define multiple keys to use, which will be tried in order for each feed entry. If none of the configured keys have a value, then the channel name will default to the feed title.
 
 **Examples**
-- Use the author email only for entries which match `amazonses.com`. If the email matches `01009cb9a` then the channel name will be `DualShockers`, or if it matches `ff9a001` then `Auto Trader`. Otherwise the full email address is used.
+- Use the author email only for entries which match `amazonses.com`. If the email matches `01009cb9a` then the channel name will be `DualShockers`, or if it matches `ff9a001` then `Auto Trader`. If `amazonses.com` is not matched, it will fall through to either the next configured `key` block or the default title.
 
 ```yaml
 item-channel:
@@ -897,6 +901,15 @@ item-channel:
 item-channel:
   - key: source
   - key: link
+```
+
+- Extract the 3rd field from a link. For example, with github the value for `link` will be `github.com/glanceapp/glance/releases`. `match: /` will split on the '/' and `select: 3` will select 'glance'.
+
+```yaml
+item-channel:
+  - key: link
+    match: /
+    select: 3
 ```
 
 ### Videos
